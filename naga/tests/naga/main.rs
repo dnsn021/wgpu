@@ -1,3 +1,4 @@
+mod atomic_vec2u;
 mod example_wgsl;
 mod snapshots;
 mod spirv_capabilities;

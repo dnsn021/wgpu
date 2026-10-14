@@ -548,6 +548,9 @@ impl super::Validator {
             E::LocalVariable(_handle) => ShaderStages::all(),
             E::Load { pointer } => {
                 match resolver[pointer] {
+                    Ti::Pointer { base, .. } if self.types[base.index()].prohibits_load() => {
+                        return Err(ExpressionError::InvalidPointerType(pointer));
+                    }
                     Ti::Pointer { base, .. }
                         if self.types[base.index()]
                             .flags

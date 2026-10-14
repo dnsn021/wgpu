@@ -858,6 +858,9 @@ impl dispatch::InstanceInterface for ContextWgpuCore {
                     ImplementedLanguageExtension::ImmediateAddressSpace => {
                         crate::WgslLanguageFeatures::ImmediateAddressSpace
                     }
+                    ImplementedLanguageExtension::AtomicVec2UMinMax => {
+                        crate::WgslLanguageFeatures::AtomicVec2UMinMax
+                    }
                 }
             },
         )

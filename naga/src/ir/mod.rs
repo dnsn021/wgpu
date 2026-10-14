@@ -869,6 +869,10 @@ pub enum TypeInner {
     },
     /// Atomic scalar.
     Atomic(Scalar),
+    /// An unsigned 64-bit atomic with eight-byte size and alignment.
+    /// Only read-write storage buffers and no-result min/max operations are supported.
+    /// Operands are `vec2<u32>`, with the low bits in `.x` and high bits in `.y`.
+    AtomicVec2U32,
     /// Pointer to another type.
     ///
     /// Pointers to scalars and vectors should be treated as equivalent to
@@ -2203,6 +2207,10 @@ pub enum Statement {
         ///
         /// If [`SHADER_FLOAT32_ATOMIC`] is enabled, this may be [`F32`].
         ///
+        /// With [`crate::valid::Capabilities::ATOMIC_VEC2U_MIN_MAX`], the pointer may
+        /// refer to [`TypeInner::AtomicVec2U32`] in read-write storage. In that case,
+        /// `fun` must be min/max, `value` must be `vec2<u32>`, and `result` must be `None`.
+        ///
         /// [`Pointer`]: TypeInner::Pointer
         /// [`Atomic`]: TypeInner::Atomic
         /// [`I32`]: Scalar::I32
@@ -2245,7 +2253,8 @@ pub enum Statement {
 
         /// Value to use in the function.
         ///
-        /// This must be a scalar of the same type as [`pointer`]'s atomic's scalar type.
+        /// This must match the atomic's scalar type, or be `vec2<u32>` for
+        /// [`TypeInner::AtomicVec2U32`].
         ///
         /// [`pointer`]: Statement::Atomic::pointer
         value: Handle<Expression>,

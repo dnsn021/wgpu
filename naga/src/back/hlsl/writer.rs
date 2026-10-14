@@ -336,6 +336,17 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
             ));
         }
 
+        if module
+            .types
+            .iter()
+            .any(|(_, ty)| ty.inner == TypeInner::AtomicVec2U32)
+            && self.options.shader_model < ShaderModel::V6_6
+        {
+            return Err(Error::ShaderModelTooLow(
+                "atomic<vec2u>".into(),
+                ShaderModel::V6_6,
+            ));
+        }
         // Write special constants, if needed
         if let Some(ref bt) = self.options.special_constants_binding {
             writeln!(self.out, "struct {SPECIAL_CBUF_TYPE} {{")?;
@@ -1564,6 +1575,7 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
             TypeInner::Scalar(scalar) | TypeInner::Atomic(scalar) => {
                 write!(self.out, "{}", scalar.to_hlsl_str()?)?;
             }
+            TypeInner::AtomicVec2U32 => write!(self.out, "uint64_t")?,
             TypeInner::Vector { size, scalar } => {
                 write!(
                     self.out,
@@ -2728,6 +2740,26 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
                 value,
                 result,
             } => {
+                let packed_value = if matches!(
+                    func_ctx.resolve_type(value, &module.types),
+                    TypeInner::Vector {
+                        size: crate::VectorSize::Bi,
+                        scalar: Scalar::U32
+                    }
+                ) {
+                    let vec_name = self.namer.call("atomic_value");
+                    let packed_name = self.namer.call("atomic_value64");
+                    write!(self.out, "{level}const uint2 {vec_name} = ")?;
+                    self.write_expr(module, value, func_ctx)?;
+                    writeln!(self.out, ";")?;
+                    writeln!(
+                        self.out,
+                        "{level}const uint64_t {packed_name} = uint64_t({vec_name}.x) | (uint64_t({vec_name}.y) << 32);"
+                    )?;
+                    Some(packed_name)
+                } else {
+                    None
+                };
                 write!(self.out, "{level}")?;
                 let res_var_info = if let Some(res_handle) = result {
                     let name = Baked(res_handle).to_string();
@@ -2762,16 +2794,19 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
                             fun,
                             compare_expr,
                             value,
+                            packed_value.as_deref(),
                             &res_var_info,
                         )?;
                     }
                     crate::AddressSpace::Storage { .. } => {
                         let var_handle = self.fill_access_chain(module, pointer, func_ctx)?;
                         let var_name = &self.names[&NameKey::GlobalVariable(var_handle)];
-                        let width = match func_ctx.resolve_type(value, &module.types) {
-                            &TypeInner::Scalar(Scalar { width: 8, .. }) => "64",
-                            _ => "",
-                        };
+                        let is_64_bit = packed_value.is_some()
+                            || matches!(
+                                func_ctx.resolve_type(value, &module.types),
+                                &TypeInner::Scalar(Scalar { width: 8, .. })
+                            );
+                        let width = if is_64_bit { "64" } else { "" };
                         write!(self.out, "{var_name}.Interlocked{fun_str}{width}(")?;
                         let chain = mem::take(&mut self.temp_access_chain);
                         self.write_storage_address(module, &chain, func_ctx)?;
@@ -2782,6 +2817,7 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
                             fun,
                             compare_expr,
                             value,
+                            packed_value.as_deref(),
                             &res_var_info,
                         )?;
                     }
@@ -4927,6 +4963,7 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
     }
 
     /// Helper to emit the shared tail of an HLSL atomic call (arguments, value, result)
+    #[allow(clippy::too_many_arguments)]
     fn emit_hlsl_atomic_tail(
         &mut self,
         module: &Module,
@@ -4934,6 +4971,7 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
         fun: &crate::AtomicFunction,
         compare_expr: Option<Handle<crate::Expression>>,
         value: Handle<crate::Expression>,
+        packed_value: Option<&str>,
         res_var_info: &Option<(Handle<crate::Expression>, String)>,
     ) -> BackendResult {
         if let Some(cmp) = compare_expr {
@@ -4945,7 +4983,11 @@ impl<'a, W: fmt::Write> super::Writer<'a, W> {
             // we just wrote `InterlockedAdd`, so negate the argument
             write!(self.out, "-")?;
         }
-        self.write_expr(module, value, func_ctx)?;
+        if let Some(packed) = packed_value {
+            write!(self.out, "{packed}")?;
+        } else {
+            self.write_expr(module, value, func_ctx)?;
+        }
         if let Some(&(_res_handle, ref res_name)) = res_var_info.as_ref() {
             write!(self.out, ", ")?;
             if compare_expr.is_some() {

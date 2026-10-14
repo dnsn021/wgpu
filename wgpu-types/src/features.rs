@@ -85,6 +85,9 @@ mod webgpu_impl {
 
     #[doc(hidden)]
     pub const WEBGPU_FEATURE_TEXTURE_COMPONENT_SWIZZLE: u64 = 1 << 18;
+
+    #[doc(hidden)]
+    pub const WEBGPU_FEATURE_ATOMIC_VEC2U_MIN_MAX: u64 = 1 << 19;
 }
 
 impl From<FeatureBits> for Features {
@@ -1390,6 +1393,22 @@ crate::bitflags_array! {
         /// This is a web and native feature.
         #[name("texture-component-swizzle")]
         const TEXTURE_COMPONENT_SWIZZLE = WEBGPU_FEATURE_TEXTURE_COMPONENT_SWIZZLE;
+
+        /// Enables WGSL `enable atomic_vec2u_min_max;`, `atomic<vec2u>`,
+        /// and the void-returning `atomicStoreMin` and `atomicStoreMax` builtins.
+        /// Values are compared as unsigned 64-bit integers, with `.x` holding
+        /// the low 32 bits and `.y` holding the high 32 bits.
+        /// Only read-write storage buffers in compute and fragment shaders are supported.
+        ///
+        /// Supported platforms:
+        /// - Vulkan
+        /// - DX12 (DXC, shader model 6.6)
+        /// - Metal
+        /// - WebGPU
+        ///
+        /// This is a web and native feature.
+        #[name("atomic-vec2u-min-max")]
+        const ATOMIC_VEC2U_MIN_MAX = WEBGPU_FEATURE_ATOMIC_VEC2U_MIN_MAX;
     }
 }
 

@@ -855,6 +855,7 @@ pub fn supported_capabilities() -> crate::valid::Capabilities {
         | Caps::SUBGROUP
         | Caps::SUBGROUP_BARRIER
         // No SUBGROUP_VERTEX_STAGE
+        | Caps::ATOMIC_VEC2U_MIN_MAX
         | Caps::SHADER_INT64_ATOMIC_MIN_MAX
         // No SHADER_INT64_ATOMIC_ALL_OPS
         | Caps::SHADER_FLOAT32_ATOMIC

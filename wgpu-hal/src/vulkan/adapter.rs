@@ -358,7 +358,11 @@ impl PhysicalDeviceFeatures {
                 .shader_clip_distance(requested_features.contains(wgt::Features::CLIP_DISTANCES))
                 //.shader_cull_distance(requested_features.contains(wgt::Features::SHADER_CULL_DISTANCE))
                 .shader_float64(requested_features.contains(wgt::Features::SHADER_F64))
-                .shader_int64(requested_features.contains(wgt::Features::SHADER_INT64))
+                .shader_int64(
+                    requested_features.intersects(
+                        wgt::Features::SHADER_INT64 | wgt::Features::ATOMIC_VEC2U_MIN_MAX,
+                    ),
+                )
                 .shader_int16(requested_features.contains(wgt::Features::SHADER_I16))
                 //.shader_resource_residency(requested_features.contains(wgt::Features::SHADER_RESOURCE_RESIDENCY))
                 .geometry_shader(requested_features.contains(wgt::Features::PRIMITIVE_INDEX))
@@ -511,7 +515,10 @@ impl PhysicalDeviceFeatures {
                 );
                 Some(
                     vk::PhysicalDeviceShaderAtomicInt64Features::default()
-                        .shader_buffer_int64_atomics(needed)
+                        .shader_buffer_int64_atomics(
+                            needed
+                                || requested_features.contains(wgt::Features::ATOMIC_VEC2U_MIN_MAX),
+                        )
                         .shader_shared_int64_atomics(needed),
                 )
             } else {
@@ -786,6 +793,10 @@ impl PhysicalDeviceFeatures {
         features.set(F::PRIMITIVE_INDEX, self.core.geometry_shader != 0);
 
         if let Some(ref shader_atomic_int64) = self.shader_atomic_int64 {
+            features.set(
+                F::ATOMIC_VEC2U_MIN_MAX,
+                self.core.shader_int64 != 0 && shader_atomic_int64.shader_buffer_int64_atomics != 0,
+            );
             features.set(
                 F::SHADER_INT64_ATOMIC_ALL_OPS | F::SHADER_INT64_ATOMIC_MIN_MAX,
                 shader_atomic_int64.shader_buffer_int64_atomics != 0
@@ -1477,7 +1488,9 @@ impl PhysicalDeviceProperties {
 
         // Require `VK_KHR_shader_atomic_int64` if the associated feature was requested
         if requested_features.intersects(
-            wgt::Features::SHADER_INT64_ATOMIC_ALL_OPS | wgt::Features::SHADER_INT64_ATOMIC_MIN_MAX,
+            wgt::Features::SHADER_INT64_ATOMIC_ALL_OPS
+                | wgt::Features::SHADER_INT64_ATOMIC_MIN_MAX
+                | wgt::Features::ATOMIC_VEC2U_MIN_MAX,
         ) {
             extensions.push(khr::shader_atomic_int64::NAME);
         }
@@ -2837,7 +2850,9 @@ impl super::Adapter {
                 capabilities.push(spv::Capability::RayQueryKHR);
             }
 
-            if features.contains(wgt::Features::SHADER_INT64) {
+            if features
+                .intersects(wgt::Features::SHADER_INT64 | wgt::Features::ATOMIC_VEC2U_MIN_MAX)
+            {
                 capabilities.push(spv::Capability::Int64);
             }
 
@@ -2852,7 +2867,8 @@ impl super::Adapter {
             if features.intersects(
                 wgt::Features::SHADER_INT64_ATOMIC_ALL_OPS
                     | wgt::Features::SHADER_INT64_ATOMIC_MIN_MAX
-                    | wgt::Features::TEXTURE_INT64_ATOMIC,
+                    | wgt::Features::TEXTURE_INT64_ATOMIC
+                    | wgt::Features::ATOMIC_VEC2U_MIN_MAX,
             ) {
                 capabilities.push(spv::Capability::Int64Atomics);
             }

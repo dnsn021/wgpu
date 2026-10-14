@@ -15,6 +15,10 @@ pub fn features_to_naga_capabilities(
         Caps::IMMEDIATES,
         features.contains(wgt::Features::IMMEDIATES),
     );
+    caps.set(
+        Caps::ATOMIC_VEC2U_MIN_MAX,
+        features.contains(wgt::Features::ATOMIC_VEC2U_MIN_MAX),
+    );
     caps.set(Caps::FLOAT64, features.contains(wgt::Features::SHADER_F64));
     caps.set(
         Caps::SHADER_FLOAT16,

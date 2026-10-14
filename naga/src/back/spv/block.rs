@@ -3963,19 +3963,35 @@ impl BlockContext<'_> {
                     // Compare-and-exchange operations produce a struct result,
                     // so use `result`'s type if it is available. For no-result
                     // operations, fall back to `value`'s type.
-                    let result_type_id =
-                        self.get_expression_type_id(&self.fun_info[result.unwrap_or(value)].ty);
+                    let is_vec2u = matches!(
+                        self.fun_info[value].ty.inner_with(&self.ir_module.types),
+                        crate::TypeInner::Vector {
+                            size: crate::VectorSize::Bi,
+                            scalar: crate::Scalar::U32
+                        }
+                    );
+                    let result_type_id = if is_vec2u {
+                        self.get_numeric_type_id(NumericType::Scalar(crate::Scalar::U64))
+                    } else {
+                        self.get_expression_type_id(&self.fun_info[result.unwrap_or(value)].ty)
+                    };
 
                     if let Some(result) = result {
                         self.cached[result] = id;
                     }
 
+                    let mut conditional_access = None;
                     let pointer_id = match self.write_access_chain(
                         pointer,
                         &mut block,
                         AccessTypeAdjustment::None,
                     )? {
                         ExpressionPointer::Ready { pointer_id } => pointer_id,
+                        ExpressionPointer::Conditional { condition, access } if is_vec2u => {
+                            let pointer_id = access.result_id.unwrap();
+                            conditional_access = Some((condition, access));
+                            pointer_id
+                        }
                         ExpressionPointer::Conditional { .. } => {
                             return Err(Error::FeatureNotImplemented(
                                 "Atomics out-of-bounds handling",
@@ -3991,13 +4007,29 @@ impl BlockContext<'_> {
                     let (semantics, scope) = space.to_spirv_semantics_and_scope();
                     let scope_constant_id = self.get_scope_constant(scope as u32);
                     let semantics_id = self.get_index_constant(semantics.bits());
-                    let value_id = self.cached[value];
+                    let mut value_id = self.cached[value];
                     let value_inner = self.fun_info[value].ty.inner_with(&self.ir_module.types);
-
-                    let crate::TypeInner::Scalar(scalar) = *value_inner else {
-                        return Err(Error::FeatureNotImplemented(
-                            "Atomics with non-scalar values",
-                        ));
+                    let scalar = match *value_inner {
+                        crate::TypeInner::Vector {
+                            size: crate::VectorSize::Bi,
+                            scalar: crate::Scalar::U32,
+                        } => {
+                            let packed_id = self.gen_id();
+                            block.body.push(Instruction::unary(
+                                spirv::Op::Bitcast,
+                                result_type_id,
+                                packed_id,
+                                value_id,
+                            ));
+                            value_id = packed_id;
+                            crate::Scalar::U64
+                        }
+                        crate::TypeInner::Scalar(scalar) => scalar,
+                        _ => {
+                            return Err(Error::FeatureNotImplemented(
+                                "Atomics with non-scalar values",
+                            ));
+                        }
                     };
 
                     let instruction = match *fun {
@@ -4182,7 +4214,15 @@ impl BlockContext<'_> {
                         }
                     };
 
-                    block.body.push(instruction);
+                    if let Some((condition, access)) = conditional_access {
+                        let mut selection = Selection::start(&mut block, ());
+                        selection.if_true(self, condition, ());
+                        selection.block().body.push(access);
+                        selection.block().body.push(instruction);
+                        selection.finish(self, ());
+                    } else {
+                        block.body.push(instruction);
+                    }
                 }
                 Statement::ImageAtomic {
                     image,

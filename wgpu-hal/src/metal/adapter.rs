@@ -1327,7 +1327,7 @@ impl super::CapabilitiesQuery {
             self.int64 && self.msl_version >= MTLLanguageVersion::Version2_3,
         );
         features.set(
-            F::SHADER_INT64_ATOMIC_MIN_MAX,
+            F::SHADER_INT64_ATOMIC_MIN_MAX | F::ATOMIC_VEC2U_MIN_MAX,
             self.int64_atomics_min_max && self.msl_version >= MTLLanguageVersion::Version2_4,
         );
         features.set(

@@ -499,6 +499,11 @@ impl<'a, W: Write> Writer<'a, W> {
                 scalar,
                 space: _,
             } => write!(self.out, "{}", glsl_scalar(scalar)?.full)?,
+            TypeInner::AtomicVec2U32 => {
+                return Err(Error::Custom(
+                    "atomic<vec2u> is not supported by GLSL".into(),
+                ))
+            }
             // Vectors are just `gvecN` where `g` is the scalar prefix and `N` is the vector size
             TypeInner::Vector { size, scalar }
             | TypeInner::ValuePointer {
@@ -3788,6 +3793,11 @@ impl<'a, W: Write> Writer<'a, W> {
                             TypeInner::Vector { size, .. } => {
                                 write!(self.out, "{}vec{}", scalar.prefix, size as u8)?
                             }
+                            TypeInner::AtomicVec2U32 => {
+                                return Err(Error::Custom(
+                                    "atomic<vec2u> is not supported by GLSL".into(),
+                                ))
+                            }
                             _ => write!(self.out, "{}", scalar.full)?,
                         }
 
@@ -4409,6 +4419,11 @@ impl<'a, W: Write> Writer<'a, W> {
         match *inner {
             TypeInner::Scalar(scalar) | TypeInner::Atomic(scalar) => {
                 self.write_zero_init_scalar(scalar.kind)?;
+            }
+            TypeInner::AtomicVec2U32 => {
+                return Err(Error::Custom(
+                    "atomic<vec2u> is not supported by GLSL".into(),
+                ))
             }
             TypeInner::Vector { scalar, .. } => {
                 self.write_value_type(inner)?;

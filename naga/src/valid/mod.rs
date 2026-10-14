@@ -226,6 +226,8 @@ bitflags::bitflags! {
         const LINEAR_INTERPOLATION = 1 << 44;
         /// Support for `debugPrintf`.
         const DEBUG_PRINTF = 1 << 45;
+        /// Support for storage-buffer `atomic<vec2u>` min/max without a result.
+        const ATOMIC_VEC2U_MIN_MAX = 1 << 46;
     }
 }
 
@@ -260,6 +262,7 @@ impl Capabilities {
                 Some(Ext::WgpuBindingArray)
             }
             Self::DEBUG_PRINTF => Some(Ext::WgpuDebugPrintf),
+            Self::ATOMIC_VEC2U_MIN_MAX => Some(Ext::AtomicVec2UMinMax),
             _ => None,
         }
     }
@@ -547,6 +550,7 @@ impl crate::TypeInner {
                 ..
             }
             | Self::Atomic { .. }
+            | Self::AtomicVec2U32
             | Self::Pointer { .. }
             | Self::ValuePointer { .. }
             | Self::Struct { .. } => true,

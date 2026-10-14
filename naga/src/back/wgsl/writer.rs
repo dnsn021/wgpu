@@ -299,6 +299,7 @@ impl<W: Write> Writer<W> {
             per_vertex: bool,
             binding_array: bool,
             debug_printf: bool,
+            atomic_vec2u_min_max: bool,
         }
         let mut needed = RequiredEnabled {
             mesh_shaders: module.uses_mesh_shaders(),
@@ -375,6 +376,7 @@ impl<W: Write> Writer<W> {
                 TypeInner::BindingArray { .. } => {
                     needed.binding_array = true;
                 }
+                TypeInner::AtomicVec2U32 => needed.atomic_vec2u_min_max = true,
                 _ => {}
             }
         }
@@ -481,6 +483,10 @@ impl<W: Write> Writer<W> {
         }
         if needed.debug_printf {
             writeln!(self.out, "enable wgpu_debug_printf;")?;
+            any_written = true;
+        }
+        if needed.atomic_vec2u_min_max {
+            writeln!(self.out, "enable atomic_vec2u_min_max;")?;
             any_written = true;
         }
         if any_written {
@@ -893,7 +899,15 @@ impl<W: Write> Writer<W> {
                 }
 
                 let fun_str = fun.to_wgsl();
-                write!(self.out, "atomic{fun_str}(")?;
+                let is_vec2u = matches!(
+                    func_ctx.info[value].ty.inner_with(&module.types),
+                    TypeInner::Vector {
+                        size: crate::VectorSize::Bi,
+                        scalar: crate::Scalar::U32
+                    }
+                );
+                let prefix = if is_vec2u { "atomicStore" } else { "atomic" };
+                write!(self.out, "{prefix}{fun_str}(")?;
                 self.write_expr(module, pointer, func_ctx)?;
                 if let crate::AtomicFunction::Exchange { compare: Some(cmp) } = *fun {
                     write!(self.out, ", ")?;

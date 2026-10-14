@@ -632,6 +632,7 @@ impl super::Adapter {
         // Check for Int64 atomic support on buffers. This is very convoluted, but is based on a conservative reading
         // of https://microsoft.github.io/DirectX-Specs/d3d/HLSL_SM_6_6_Int64_and_Float_Atomics.html#integer-64-bit-capabilities.
         let atomic_int64_buffers;
+        let atomic_vec2u_min_max;
         let atomic_int64_textures;
         {
             let mut features9 = Direct3D12::D3D12_FEATURE_DATA_D3D12_OPTIONS9::default();
@@ -654,6 +655,13 @@ impl super::Adapter {
             }
             .is_ok();
 
+            atomic_vec2u_min_max = hr11
+                && hr.is_ok()
+                && shader_model >= naga::back::hlsl::ShaderModel::V6_6
+                && features1.Int64ShaderOps.as_bool()
+                && features11
+                    .AtomicInt64OnDescriptorHeapResourceSupported
+                    .as_bool();
             atomic_int64_buffers = hr9 && hr11 && hr.is_ok()
                 // Int64 atomics show up in SM6.6.
                 && shader_model >= naga::back::hlsl::ShaderModel::V6_6
@@ -684,6 +692,7 @@ impl super::Adapter {
             wgt::Features::SHADER_INT64_ATOMIC_ALL_OPS | wgt::Features::SHADER_INT64_ATOMIC_MIN_MAX,
             atomic_int64_buffers,
         );
+        features.set(wgt::Features::ATOMIC_VEC2U_MIN_MAX, atomic_vec2u_min_max);
         features.set(wgt::Features::TEXTURE_INT64_ATOMIC, atomic_int64_textures);
         let mesh_shader_supported = {
             let mut features7 = Direct3D12::D3D12_FEATURE_DATA_D3D12_OPTIONS7::default();

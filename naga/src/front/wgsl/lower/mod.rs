@@ -911,7 +911,7 @@ impl<'source, 'temp, 'out> ExpressionContext<'source, 'temp, 'out> {
                         types: &crate::UniqueArena<ir::Type>,
                     ) -> bool {
                         match types[ty].inner {
-                            ir::TypeInner::Atomic(_) => true,
+                            ir::TypeInner::Atomic(_) | ir::TypeInner::AtomicVec2U32 => true,
                             ir::TypeInner::Array { base, .. } => type_contains_atomic(base, types),
                             ir::TypeInner::Struct { ref members, .. } => members
                                 .iter()
@@ -2903,8 +2903,21 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                         ir::TypeInner::Array { base, size, stride }
                     }
                     conv::TypeGenerator::Atomic => {
-                        let (scalar, _) = tl.scalar_ty(self, ctx)?;
-                        ir::TypeInner::Atomic(scalar)
+                        let (base, span) = tl.ty_with_span(self, ctx)?;
+                        match ctx.module.types[base].inner {
+                            ir::TypeInner::Scalar(scalar) => ir::TypeInner::Atomic(scalar),
+                            ir::TypeInner::Vector {
+                                size: ir::VectorSize::Bi,
+                                scalar: ir::Scalar::U32,
+                            } => {
+                                ctx.enable_extensions.require(
+                                    crate::front::wgsl::ImplementedEnableExtension::AtomicVec2UMinMax,
+                                    span,
+                                )?;
+                                ir::TypeInner::AtomicVec2U32
+                            }
+                            _ => return Err(Box::new(Error::UnknownScalarType(span))),
+                        }
                     }
                     conv::TypeGenerator::Pointer => {
                         let mut space = tl.address_space(ctx)?;
@@ -3328,6 +3341,15 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
                     args.finish()?;
 
                     (ir::Expression::ArrayLength(expr), MustUse::Yes)
+                }
+                "atomicStoreMin" | "atomicStoreMax" => {
+                    let fun = match function_name {
+                        "atomicStoreMin" => ir::AtomicFunction::Min,
+                        "atomicStoreMax" => ir::AtomicFunction::Max,
+                        _ => unreachable!(),
+                    };
+                    self.atomic_vec2u_store(function_span, fun, arguments, ctx)?;
+                    return Ok(None);
                 }
                 "atomicLoad" => {
                     let mut args = ctx.prepare_args(arguments, 1, function_span);
@@ -4554,6 +4576,46 @@ impl<'source, 'temp> Lowerer<'source, 'temp> {
             span,
         );
         Ok(result)
+    }
+
+    fn atomic_vec2u_store(
+        &mut self,
+        span: Span,
+        fun: ir::AtomicFunction,
+        args: &[Handle<ast::Expression<'source>>],
+        ctx: &mut ExpressionContext<'source, '_, '_>,
+    ) -> Result<'source, ()> {
+        ctx.enable_extensions.require(
+            crate::front::wgsl::ImplementedEnableExtension::AtomicVec2UMinMax,
+            span,
+        )?;
+        let mut args = ctx.prepare_args(args, 2, span);
+        let pointer_arg = args.next()?;
+        let pointer_span = ctx.ast_expressions.get_span(pointer_arg);
+        let pointer = self.expression(pointer_arg, ctx)?;
+        let ir::TypeInner::Pointer { base, .. } = *resolve_inner!(ctx, pointer) else {
+            return Err(Box::new(Error::InvalidAtomicPointer(pointer_span)));
+        };
+        if ctx.module.types[base].inner != ir::TypeInner::AtomicVec2U32 {
+            return Err(Box::new(Error::InvalidAtomicPointer(pointer_span)));
+        }
+        let value = self.expression_with_leaf_scalar(args.next()?, ir::Scalar::U32, ctx)?;
+        args.finish()?;
+
+        let rctx = ctx.runtime_expression_ctx(span)?;
+        rctx.block
+            .extend(rctx.emitter.finish(&rctx.function.expressions));
+        rctx.emitter.start(&rctx.function.expressions);
+        rctx.block.push(
+            ir::Statement::Atomic {
+                pointer,
+                fun,
+                value,
+                result: None,
+            },
+            span,
+        );
+        Ok(())
     }
 
     fn texture_sample_helper(

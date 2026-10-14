@@ -229,6 +229,7 @@ impl Display for TypeContext<'_> {
             crate::TypeInner::Atomic(scalar) => {
                 write!(out, "{}::atomic_{}", NAMESPACE, scalar.to_msl_name())
             }
+            crate::TypeInner::AtomicVec2U32 => write!(out, "{NAMESPACE}::atomic_ulong"),
             crate::TypeInner::Vector { size, scalar } => put_numeric_type(out, scalar, &[size]),
             crate::TypeInner::Matrix {
                 columns,
@@ -704,6 +705,7 @@ impl crate::Type {
             | Ti::Matrix { .. }
             | Ti::CooperativeMatrix { .. }
             | Ti::Atomic(_)
+            | Ti::AtomicVec2U32
             | Ti::Pointer { .. }
             | Ti::ValuePointer { .. } => self.name.is_some(),
             // composite types are better to be aliased, regardless of the name
@@ -4217,18 +4219,37 @@ impl<W: Write> Writer<W> {
                     result,
                 } => {
                     let context = &context.expression;
+                    let packed_value = if matches!(
+                        context.resolve_type(value),
+                        crate::TypeInner::Vector {
+                            size: crate::VectorSize::Bi,
+                            scalar: crate::Scalar::U32
+                        }
+                    ) {
+                        let name = self.namer.call("atomic_value");
+                        write!(self.out, "{level}const {NAMESPACE}::uint2 {name} = ")?;
+                        self.put_expression(value, context, true)?;
+                        writeln!(self.out, ";")?;
+                        Some(format!(
+                            "({NAMESPACE}::ulong({name}.x) | ({NAMESPACE}::ulong({name}.y) << 32))"
+                        ))
+                    } else {
+                        None
+                    };
 
                     // This backend supports `SHADER_INT64_ATOMIC_MIN_MAX` but not
                     // `SHADER_INT64_ATOMIC_ALL_OPS`, so we can assume that if `result` is
                     // `Some`, we are not operating on a 64-bit value, and that if we are
                     // operating on a 64-bit value, `result` is `None`.
                     write!(self.out, "{level}")?;
+                    let is_64_bit = packed_value.is_some()
+                        || context.resolve_type(value).scalar_width() == Some(8);
                     let fun_key = if let Some(result) = result {
                         let res_name = Baked(result).to_string();
                         self.start_baking_expression(result, context, &res_name)?;
                         self.named_expressions.insert(result, res_name);
                         fun.to_msl()
-                    } else if context.resolve_type(value).scalar_width() == Some(8) {
+                    } else if is_64_bit {
                         fun.to_msl_64_bit()?
                     } else {
                         fun.to_msl()
@@ -4254,7 +4275,11 @@ impl<W: Write> Writer<W> {
                             write!(self.out, ", ")?;
                             self.put_expression(cmp, context, true)?;
                             write!(self.out, ", ")?;
-                            self.put_expression(value, context, true)?;
+                            if let Some(ref packed) = packed_value {
+                                write!(self.out, "{packed}")?;
+                            } else {
+                                self.put_expression(value, context, true)?;
+                            }
                             write!(self.out, ")")?;
                         }
                         _ => {
@@ -4264,14 +4289,22 @@ impl<W: Write> Writer<W> {
                             )?;
                             self.put_access_chain(pointer, policy, context)?;
                             write!(self.out, ", ")?;
-                            self.put_expression(value, context, true)?;
+                            if let Some(ref packed) = packed_value {
+                                write!(self.out, "{packed}")?;
+                            } else {
+                                self.put_expression(value, context, true)?;
+                            }
                             write!(self.out, ", {NAMESPACE}::memory_order_relaxed)")?;
                         }
                     }
 
                     // Finish the ternary expression.
                     if checked {
-                        write!(self.out, " : DefaultConstructible()")?;
+                        if packed_value.is_some() {
+                            write!(self.out, " : (void)0")?;
+                        } else {
+                            write!(self.out, " : DefaultConstructible()")?;
+                        }
                     }
 
                     // Done
@@ -4594,6 +4627,14 @@ impl<W: Write> Writer<W> {
         // Work around Metal bug where `uint` is not available by default
         writeln!(self.out, "using {NAMESPACE}::uint;")?;
 
+        if module
+            .types
+            .iter()
+            .any(|(_, ty)| ty.inner == crate::TypeInner::AtomicVec2U32)
+            && options.lang_version < (2, 4)
+        {
+            return Err(Error::UnsupportedFunction("atomicStoreMin/Max".into()));
+        }
         if module.uses_mesh_shaders() && options.lang_version < (3, 0) {
             return Err(Error::UnsupportedMeshShader);
         }

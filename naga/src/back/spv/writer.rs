@@ -475,6 +475,7 @@ impl Writer {
         Some(match *inner {
             crate::TypeInner::Scalar(_)
             | crate::TypeInner::Atomic(_)
+            | crate::TypeInner::AtomicVec2U32
             | crate::TypeInner::Vector { .. }
             | crate::TypeInner::Matrix { .. } => {
                 // We expect `NumericType::from_inner` to handle all
@@ -2069,6 +2070,10 @@ impl Writer {
                 )?;
                 self.use_extension("SPV_EXT_shader_atomic_float_add");
             }
+            crate::TypeInner::AtomicVec2U32 => {
+                self.require_any("64 bit integers", &[spirv::Capability::Int64])?;
+                self.require_any("64 bit integer atomics", &[spirv::Capability::Int64Atomics])?;
+            }
             // 16 bit floating-point support requires Float16 capability
             crate::TypeInner::Matrix {
                 scalar: crate::Scalar::F16,
@@ -2280,6 +2285,7 @@ impl Writer {
                 // handled by `write_type_declaration_local` above.
                 crate::TypeInner::Scalar(_)
                 | crate::TypeInner::Atomic(_)
+                | crate::TypeInner::AtomicVec2U32
                 | crate::TypeInner::Vector { .. }
                 | crate::TypeInner::Matrix { .. }
                 | crate::TypeInner::CooperativeMatrix { .. }

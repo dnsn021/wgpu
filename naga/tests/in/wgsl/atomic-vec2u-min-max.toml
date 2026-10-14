@@ -1,0 +1,19 @@
+capabilities = "ATOMIC_VEC2U_MIN_MAX"
+targets = "SPIRV | METAL | HLSL | WGSL"
+
+[msl]
+fake_missing_bindings = true
+lang_version = [2, 4]
+spirv_cross_compatibility = false
+
+[hlsl]
+shader_model = "V6_6"
+fake_missing_bindings = true
+restrict_indexing = true
+
+[spv]
+version = [1, 3]
+
+[bounds_check_policies]
+index = "ReadZeroSkipWrite"
+buffer = "ReadZeroSkipWrite"

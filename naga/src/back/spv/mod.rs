@@ -412,6 +412,7 @@ impl NumericType {
             crate::TypeInner::Scalar(scalar) | crate::TypeInner::Atomic(scalar) => {
                 Some(NumericType::Scalar(scalar))
             }
+            crate::TypeInner::AtomicVec2U32 => Some(NumericType::Scalar(crate::Scalar::U64)),
             crate::TypeInner::Vector { size, scalar } => Some(NumericType::Vector { size, scalar }),
             crate::TypeInner::Matrix {
                 columns,
@@ -1203,6 +1204,7 @@ pub fn supported_capabilities() -> crate::valid::Capabilities {
         | Caps::SUBGROUP
         | Caps::SUBGROUP_BARRIER
         | Caps::SUBGROUP_VERTEX_STAGE
+        | Caps::ATOMIC_VEC2U_MIN_MAX
         | Caps::SHADER_INT64_ATOMIC_MIN_MAX
         | Caps::SHADER_INT64_ATOMIC_ALL_OPS
         | Caps::SHADER_FLOAT32_ATOMIC

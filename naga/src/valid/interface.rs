@@ -927,6 +927,14 @@ impl super::Validator {
         use super::TypeFlags;
 
         log::debug!("var {var:?}");
+        let read_write_access = crate::StorageAccess::LOAD | crate::StorageAccess::STORE;
+        let is_read_write_storage = matches!(
+            var.space,
+            crate::AddressSpace::Storage { access } if access == read_write_access
+        );
+        if self.types[var.ty.index()].requires_read_write_storage() && !is_read_write_storage {
+            return Err(GlobalVariableError::InvalidType(var.space));
+        }
         let inner_ty = match gctx.types[var.ty].inner {
             // A binding array is (mostly) supposed to behave the same as a
             // series of individually bound resources, so we can (mostly)

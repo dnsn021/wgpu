@@ -442,14 +442,48 @@ impl super::Validator {
                 .with_span_handle(pointer, context.expressions)
                 .into_other());
         };
-        let crate::TypeInner::Atomic(pointer_scalar) = context.types[pointer_base].inner else {
-            log::error!(
-                "Atomic pointer to type {:?}",
-                context.types[pointer_base].inner
-            );
-            return Err(AtomicError::InvalidPointer(pointer)
-                .with_span_handle(pointer, context.expressions)
-                .into_other());
+        let pointer_scalar = match context.types[pointer_base].inner {
+            crate::TypeInner::Atomic(pointer_scalar) => pointer_scalar,
+            crate::TypeInner::AtomicVec2U32 => {
+                if !matches!(fun, crate::AtomicFunction::Min | crate::AtomicFunction::Max) {
+                    return Err(AtomicError::InvalidOperator(*fun)
+                        .with_span_handle(pointer, context.expressions)
+                        .into_other());
+                }
+                let read_write_access = crate::StorageAccess::LOAD | crate::StorageAccess::STORE;
+                if !matches!(
+                    pointer_space,
+                    crate::AddressSpace::Storage { access } if access == read_write_access
+                ) {
+                    return Err(AtomicError::InvalidAddressSpace(pointer_space)
+                        .with_span_handle(pointer, context.expressions)
+                        .into_other());
+                }
+                if let Some(result) = result {
+                    return Err(AtomicError::InvalidResultExpression(result)
+                        .with_span_handle(result, context.expressions)
+                        .into_other());
+                }
+                let value_inner = context.resolve_type_inner(value, &self.valid_expression_set)?;
+                if !matches!(
+                    *value_inner,
+                    crate::TypeInner::Vector {
+                        size: crate::VectorSize::Bi,
+                        scalar: crate::Scalar::U32,
+                    }
+                ) {
+                    return Err(AtomicError::InvalidOperand(value)
+                        .with_span_handle(value, context.expressions)
+                        .into_other());
+                }
+                return Ok(());
+            }
+            ref other => {
+                log::error!("Atomic pointer to type {other:?}");
+                return Err(AtomicError::InvalidPointer(pointer)
+                    .with_span_handle(pointer, context.expressions)
+                    .into_other());
+            }
         };
 
         // The `value` operand must be a scalar of the same type as the atomic.
@@ -1098,6 +1132,13 @@ impl super::Validator {
                     let pointer_base_ty = pointer_base_tr
                         .as_ref()
                         .map(|ty| ty.inner_with(context.types));
+                    if matches!(
+                        *pointer_ty,
+                        Ti::Pointer { base, .. }
+                            if self.types[base.index()].prohibits_store()
+                    ) {
+                        return Err(FunctionError::InvalidStoreTypes { pointer, value }.with_span());
+                    }
                     let good = if let Some(&Ti::Atomic(ref scalar)) = pointer_base_ty {
                         // The Naga IR allows storing a scalar to an atomic.
                         *value_ty == Ti::Scalar(*scalar)
@@ -1285,6 +1326,15 @@ impl super::Validator {
                     result,
                 } => {
                     self.validate_atomic(pointer, fun, value, result, span, context)?;
+                    let pointer_ty =
+                        context.resolve_type_inner(pointer, &self.valid_expression_set)?;
+                    if matches!(
+                        *pointer_ty,
+                        Ti::Pointer { base, .. }
+                            if context.types[base].inner == Ti::AtomicVec2U32
+                    ) {
+                        stages &= super::ShaderStages::FRAGMENT | super::ShaderStages::COMPUTE;
+                    }
                 }
                 S::ImageAtomic {
                     image,

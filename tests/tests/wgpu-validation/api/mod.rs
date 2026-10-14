@@ -1,3 +1,4 @@
+mod atomic_vec2u;
 mod binding_arrays;
 mod buffer;
 mod buffer_mapping;

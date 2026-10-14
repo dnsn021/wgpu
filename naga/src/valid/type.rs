@@ -113,6 +113,8 @@ pub enum TypeError {
     InvalidAtomicWidth(crate::ScalarKind, crate::Bytes),
     #[error("Invalid type for pointer target {0:?}")]
     InvalidPointerBase(Handle<crate::Type>),
+    #[error("Types containing atomic<vec2u> require read-write storage, not {0:?}")]
+    InvalidAtomicVec2UAddressSpace(crate::AddressSpace),
     #[error("Unsized types like {base:?} must be in the `Storage` address space, not `{space:?}`")]
     InvalidPointerToUnsized {
         base: Handle<crate::Type>,
@@ -240,9 +242,27 @@ const fn ptr_space_argument_flag(space: crate::AddressSpace) -> TypeFlags {
     }
 }
 
+bitflags::bitflags! {
+    /// Restrictions that propagate through arrays and structures.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    struct TypeRestrictions: u8 {
+        /// Variables and pointers of this type must use read-write storage.
+        const READ_WRITE_STORAGE_ONLY = 0x1;
+        /// Values of this type cannot be loaded with [`Expression::Load`].
+        ///
+        /// [`Expression::Load`]: crate::Expression::Load
+        const NO_LOAD = 0x2;
+        /// Values of this type cannot be stored with [`Statement::Store`].
+        ///
+        /// [`Statement::Store`]: crate::Statement::Store
+        const NO_STORE = 0x4;
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct TypeInfo {
     pub flags: TypeFlags,
+    restrictions: TypeRestrictions,
     pub uniform_layout: LayoutCompatibility,
     pub storage_layout: LayoutCompatibility,
     pub immediates_compatibility: ImmediateCompatibility,
@@ -252,6 +272,7 @@ impl TypeInfo {
     const fn dummy() -> Self {
         TypeInfo {
             flags: TypeFlags::empty(),
+            restrictions: TypeRestrictions::empty(),
             uniform_layout: Ok(Alignment::ONE),
             storage_layout: Ok(Alignment::ONE),
             immediates_compatibility: Ok(()),
@@ -261,10 +282,24 @@ impl TypeInfo {
     const fn new(flags: TypeFlags, alignment: Alignment) -> Self {
         TypeInfo {
             flags,
+            restrictions: TypeRestrictions::empty(),
             uniform_layout: Ok(alignment),
             storage_layout: Ok(alignment),
             immediates_compatibility: Ok(()),
         }
+    }
+
+    pub(super) const fn requires_read_write_storage(&self) -> bool {
+        self.restrictions
+            .contains(TypeRestrictions::READ_WRITE_STORAGE_ONLY)
+    }
+
+    pub(super) const fn prohibits_load(&self) -> bool {
+        self.restrictions.contains(TypeRestrictions::NO_LOAD)
+    }
+
+    pub(super) const fn prohibits_store(&self) -> bool {
+        self.restrictions.contains(TypeRestrictions::NO_STORE)
     }
 }
 
@@ -386,7 +421,23 @@ impl super::Validator {
         gctx: crate::proc::GlobalCtx,
     ) -> Result<TypeInfo, TypeError> {
         use crate::TypeInner as Ti;
-        Ok(match gctx.types[handle].inner {
+        let restrictions = match gctx.types[handle].inner {
+            Ti::AtomicVec2U32 => {
+                TypeRestrictions::READ_WRITE_STORAGE_ONLY
+                    | TypeRestrictions::NO_LOAD
+                    | TypeRestrictions::NO_STORE
+            }
+            Ti::Array { base, .. } | Ti::BindingArray { base, .. } => {
+                self.types[base.index()].restrictions
+            }
+            Ti::Struct { ref members, .. } => members
+                .iter()
+                .fold(TypeRestrictions::empty(), |restrictions, member| {
+                    restrictions | self.types[member.ty.index()].restrictions
+                }),
+            _ => TypeRestrictions::empty(),
+        };
+        let mut info = match gctx.types[handle].inner {
             Ti::Scalar(scalar) => {
                 let immediates_compatibility = self.check_width(scalar)?;
                 let shareable = if scalar.kind.is_numeric() {
@@ -512,10 +563,28 @@ impl super::Validator {
                     Alignment::from_width(scalar.width),
                 )
             }
+            Ti::AtomicVec2U32 => {
+                self.require_type_capability(Capabilities::ATOMIC_VEC2U_MIN_MAX)?;
+                TypeInfo::new(
+                    TypeFlags::DATA
+                        | TypeFlags::SIZED
+                        | TypeFlags::HOST_SHAREABLE
+                        | TypeFlags::CREATION_RESOLVED,
+                    Alignment::from_width(8),
+                )
+            }
             Ti::Pointer { base, space } => {
                 use crate::AddressSpace as As;
 
                 let base_info = &self.types[base.index()];
+                if base_info.requires_read_write_storage()
+                    && space
+                        != (As::Storage {
+                            access: crate::StorageAccess::LOAD | crate::StorageAccess::STORE,
+                        })
+                {
+                    return Err(TypeError::InvalidAtomicVec2UAddressSpace(space));
+                }
                 if !base_info.flags.contains(TypeFlags::DATA) {
                     return Err(TypeError::InvalidPointerBase(base));
                 }
@@ -661,6 +730,7 @@ impl super::Validator {
 
                 TypeInfo {
                     flags: base_info.flags & type_info_mask,
+                    restrictions: TypeRestrictions::empty(),
                     uniform_layout,
                     storage_layout,
                     immediates_compatibility: Err(ImmediateError::InvalidArray),
@@ -989,6 +1059,8 @@ impl super::Validator {
 
                 TypeInfo::new(base_info.flags & type_info_mask, Alignment::ONE)
             }
-        })
+        };
+        info.restrictions = restrictions;
+        Ok(info)
     }
 }

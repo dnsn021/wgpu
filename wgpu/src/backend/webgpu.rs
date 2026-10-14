@@ -776,6 +776,8 @@ fn map_map_mode(mode: crate::MapMode) -> u32 {
     }
 }
 
+const ATOMIC_VEC2U_MIN_MAX: &str = "atomic-vec2u-min-max";
+
 const FEATURES_MAPPING: [(wgt::Features, webgpu_sys::GpuFeatureName); 16] = [
     (
         wgt::Features::BGRA8UNORM_STORAGE,
@@ -850,6 +852,9 @@ fn map_wgt_features(supported_features: webgpu_sys::GpuSupportedFeatures) -> wgt
             Some(value) if supported_features.has(&value) => features |= wgpu_feat,
             _ => {}
         }
+    }
+    if supported_features.has(ATOMIC_VEC2U_MIN_MAX) {
+        features |= wgt::Features::ATOMIC_VEC2U_MIN_MAX;
     }
     features
 }
@@ -1800,6 +1805,7 @@ impl dispatch::InstanceInterface for ContextWebGpu {
                     "immediate_address_space" => {
                         Some(crate::WgslLanguageFeatures::ImmediateAddressSpace)
                     }
+                    "atomic_vec2u_min_max" => Some(crate::WgslLanguageFeatures::AtomicVec2UMinMax),
                     _ => None,
                 })
                 .for_each(|wlf| {
@@ -1844,6 +1850,11 @@ impl dispatch::AdapterInterface for WebAdapter {
                     None
                 }
             })
+            .chain(
+                desc.required_features
+                    .contains(wgt::Features::ATOMIC_VEC2U_MIN_MAX)
+                    .then(|| js_sys::JsString::from(ATOMIC_VEC2U_MIN_MAX)),
+            )
             .collect::<Vec<js_sys::JsString>>();
         mapped_desc.set_required_features(&required_features);
 

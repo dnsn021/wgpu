@@ -24,7 +24,7 @@ webgpu:shader,execution,expression,call,builtin,textureSampleLevel:sampled_1d_co
 webgpu:shader,execution,expression,call,builtin,textureSampleLevel:sampled_2d_coords:* // slow, https://github.com/gfx-rs/wgpu/issues/9229
 webgpu:shader,execution,expression,call,builtin,textureSampleLevel:sampled_3d_coords:* // slow, https://github.com/gfx-rs/wgpu/issues/9229
 
-webgpu:shader,validation,expression,call,builtin,atomicStoreMinMax:* // device feature 'atomic-vec2u-min-max' isn't implemented
+webgpu:shader,validation,expression,call,builtin,atomicStoreMinMax:atomic_ptr_parameterization:* // storage pointer parameters, https://github.com/gfx-rs/wgpu/issues/5158
 webgpu:shader,validation,expression,call,builtin,bufferArrayView:* // buffer_view feature
 webgpu:shader,validation,expression,call,builtin,bufferLength:* // buffer_view feature
 webgpu:shader,validation,expression,call,builtin,bufferView:* // buffer_view feature
